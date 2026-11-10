@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" font-family="Inter, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .title { font-size: 26px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-size: 15px; fill: #475569; }
+      .layer { font-size: 18px; font-weight: 700; letter-spacing: 1.5px; }
+      .layer-sub { font-size: 12.5px; fill: #475569; }
+      .tbl { font-size: 15px; font-weight: 600; fill: #0f172a; font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; }
+      .txt { font-size: 12.5px; fill: #334155; }
+      .small { font-size: 11.5px; fill: #64748b; }
+      .band-title { font-size: 14px; font-weight: 700; fill: #0f172a; }
+      .mono { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 12.5px; fill: #334155; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+
+  <text x="40" y="52" class="title">Airbnb lakehouse · medallion architecture</text>
+  <text x="40" y="78" class="subtitle">Region: France (EUR) · A = Paris, B = Lyon · C = unseen client city, same code path · Databricks Free Edition (serverless, Unity Catalog)</text>
+
+  <!-- orchestration band -->
+  <rect x="40" y="100" width="1520" height="74" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="60" y="128" class="band-title">Orchestration · Databricks Jobs</text>
+  <text x="60" y="152" class="mono">airbnb_etl_all_cities(cities=["paris","lyon"])  ──for each──▶  airbnb_city_etl(city)  :  bronze ▶ silver ▶ gold</text>
+  <text x="1100" y="128" class="txt">city is the only required parameter</text>
+  <text x="1100" y="150" class="txt">adding a city = adding it to the list, no new code</text>
+
+  <!-- columns -->
+  <!-- source -->
+  <rect x="40" y="200" width="250" height="560" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="60" y="232" class="layer" fill="#334155">SOURCE</text>
+  <text x="60" y="252" class="layer-sub">Inside Airbnb, CC BY 4.0</text>
+
+  <rect x="58" y="276" width="214" height="118" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="72" y="302" class="tbl">listings.csv.gz</text>
+  <text x="72" y="326" class="txt">detailed listings, latest</text>
+  <text x="72" y="344" class="txt">snapshot per city</text>
+  <text x="72" y="370" class="small">~80 columns, all text,</text>
+  <text x="72" y="386" class="small">multi-line quoted fields</text>
+
+  <rect x="58" y="420" width="214" height="150" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="72" y="446" class="tbl">UC volume</text>
+  <text x="72" y="468" class="mono" font-size="11">bronze/raw_files/</text>
+  <text x="72" y="486" class="mono" font-size="11">{city}_listings.csv.gz</text>
+  <text x="72" y="514" class="txt">uploaded once per city;</text>
+  <text x="72" y="532" class="txt">optional source_url download</text>
+  <text x="72" y="550" class="small">gzip check before reading</text>
+
+  <!-- bronze -->
+  <rect x="330" y="200" width="290" height="560" rx="12" fill="#fbf3ea" stroke="#d6a77a"/>
+  <text x="350" y="232" class="layer" fill="#9a5b1e">BRONZE</text>
+  <text x="350" y="252" class="layer-sub">raw, replayable, nothing interpreted</text>
+
+  <rect x="348" y="276" width="254" height="236" rx="8" fill="#ffffff" stroke="#d6a77a"/>
+  <text x="362" y="302" class="tbl">listings_raw</text>
+  <text x="362" y="328" class="txt">every source column as STRING</text>
+  <text x="362" y="348" class="txt">column names normalised</text>
+  <text x="362" y="366" class="small">(BOM, spaces, case → snake_case)</text>
+  <text x="362" y="392" class="txt">+ city, snapshot_date</text>
+  <text x="362" y="410" class="txt">+ _source_file, _run_id, _ingested_at</text>
+  <text x="362" y="438" class="txt">partitioned by city</text>
+  <text x="362" y="456" class="txt">overwrite with replaceWhere</text>
+  <text x="362" y="474" class="txt">city = '…'  → idempotent</text>
+  <text x="362" y="496" class="small">mergeSchema: new columns accepted</text>
+
+  <rect x="348" y="530" width="254" height="96" rx="8" fill="#ffffff" stroke="#d6a77a"/>
+  <text x="362" y="556" class="tbl">ingestion_log</text>
+  <text x="362" y="580" class="txt">one row per run: file, size,</text>
+  <text x="362" y="598" class="txt">rows, column list, version</text>
+
+  <!-- silver -->
+  <rect x="660" y="200" width="290" height="560" rx="12" fill="#f1f3f6" stroke="#9aa5b5"/>
+  <text x="680" y="232" class="layer" fill="#4b5565">SILVER</text>
+  <text x="680" y="252" class="layer-sub">cleaned and typed listings</text>
+
+  <rect x="678" y="276" width="254" height="292" rx="8" fill="#ffffff" stroke="#9aa5b5"/>
+  <text x="692" y="302" class="tbl">listings</text>
+  <text x="692" y="326" class="txt">1 row per (city, listing_id)</text>
+  <text x="692" y="350" class="txt">contract: 7 required columns</text>
+  <text x="692" y="368" class="small">missing → fail; optional missing → NULL</text>
+  <text x="692" y="392" class="txt">try_cast typing: price, t/f, %,</text>
+  <text x="692" y="410" class="txt">dates, amenities JSON → array</text>
+  <text x="692" y="434" class="txt">impossible values → NULL</text>
+  <text x="692" y="452" class="txt">duplicate ids → latest scrape</text>
+  <text x="692" y="476" class="txt">bathrooms from text, half-bath,</text>
+  <text x="692" y="494" class="txt">Shared / Private, anomaly flag</text>
+  <text x="692" y="518" class="txt">price_flag: missing · normal ·</text>
+  <text x="692" y="536" class="txt">high (IQR) · extreme (10× median)</text>
+  <text x="692" y="556" class="small">leakage columns kept, never featurised</text>
+
+  <rect x="678" y="586" width="254" height="96" rx="8" fill="#ffffff" stroke="#9aa5b5"/>
+  <text x="692" y="612" class="tbl">quality_report</text>
+  <text x="692" y="636" class="txt">per run: parse failures, missing</text>
+  <text x="692" y="654" class="txt">columns, null %, dropped rows</text>
+
+  <!-- gold -->
+  <rect x="990" y="200" width="300" height="560" rx="12" fill="#fbf6e3" stroke="#d4b24c"/>
+  <text x="1010" y="232" class="layer" fill="#8a6d10">GOLD</text>
+  <text x="1010" y="252" class="layer-sub">metrics, model features, predictions</text>
+
+  <rect x="1008" y="276" width="264" height="64" rx="8" fill="#ffffff" stroke="#d4b24c"/>
+  <text x="1022" y="302" class="tbl">city_summary</text>
+  <text x="1022" y="324" class="txt">listings, median price, hosts, …</text>
+
+  <rect x="1008" y="350" width="264" height="64" rx="8" fill="#ffffff" stroke="#d4b24c"/>
+  <text x="1022" y="376" class="tbl">neighbourhood_summary</text>
+  <text x="1022" y="398" class="txt">price and size rank per city</text>
+
+  <rect x="1008" y="424" width="264" height="64" rx="8" fill="#ffffff" stroke="#d4b24c"/>
+  <text x="1022" y="450" class="tbl">room_type_summary</text>
+  <text x="1022" y="472" class="txt">mix and median price</text>
+
+  <rect x="1008" y="498" width="264" height="110" rx="8" fill="#ffffff" stroke="#d4b24c"/>
+  <text x="1022" y="524" class="tbl">listing_features</text>
+  <text x="1022" y="548" class="txt">22 candidate features + price,</text>
+  <text x="1022" y="566" class="txt">log_price, price_flag</text>
+  <text x="1022" y="590" class="txt">split: hash(city, id) → 20% test</text>
+
+  <rect x="1008" y="626" width="264" height="80" rx="8" fill="#ffffff" stroke="#d4b24c" stroke-dasharray="6 4"/>
+  <text x="1022" y="652" class="tbl">price_predictions</text>
+  <text x="1022" y="674" class="txt">written by the model notebook</text>
+  <text x="1022" y="692" class="small">actual, predicted, baseline, error</text>
+
+  <!-- consumers -->
+  <rect x="1330" y="200" width="230" height="560" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="1350" y="232" class="layer" fill="#334155">CONSUMERS</text>
+
+  <rect x="1348" y="276" width="194" height="150" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1362" y="302" class="band-title">Price model</text>
+  <text x="1362" y="326" class="txt">scikit-learn / Spark ML</text>
+  <text x="1362" y="350" class="txt">trains on split = train</text>
+  <text x="1362" y="368" class="txt">MAE on split = test</text>
+  <text x="1362" y="392" class="txt">baseline: median by</text>
+  <text x="1362" y="410" class="txt">room_type × accommodates</text>
+
+  <rect x="1348" y="446" width="194" height="110" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1362" y="472" class="band-title">AI/BI dashboard</text>
+  <text x="1362" y="496" class="txt">City overview</text>
+  <text x="1362" y="514" class="txt">Cross-city comparison</text>
+  <text x="1362" y="532" class="txt">Model (A, B, then C)</text>
+
+  <rect x="1348" y="576" width="194" height="96" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1362" y="602" class="band-title">Genie agent</text>
+  <text x="1362" y="626" class="txt">over gold tables only,</text>
+  <text x="1362" y="644" class="txt">instructions + examples</text>
+
+  <!-- arrows -->
+  <line x1="165" y1="394" x2="165" y2="414" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="272" y1="470" x2="342" y2="400" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="602" y1="400" x2="672" y2="400" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="932" y1="330" x2="1002" y2="308" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="932" y1="380" x2="1002" y2="382" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="932" y1="430" x2="1002" y2="456" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="932" y1="480" x2="1002" y2="540" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1272" y1="540" x2="1342" y2="360" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M1348,412 L1310,412 L1310,666 L1280,666" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-muted)"/>
+  <line x1="1272" y1="400" x2="1342" y2="500" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+  <line x1="1272" y1="610" x2="1342" y2="620" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+
+  <!-- shared module band -->
+  <rect x="40" y="784" width="1520" height="86" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="60" y="812" class="band-title">One code path · pipeline/airbnb_etl.py</text>
+  <text x="60" y="836" class="txt">Contract, casting, cleaning rules, metrics and features live in one module; the three notebooks only read parameters, call it and write.</text>
+  <text x="60" y="856" class="txt">Quality evidence for every run (bronze.ingestion_log, silver.quality_report) is appended with run_id and pipeline_version, so the first city C run stays on record next to the fixed one.</text>
+</svg>

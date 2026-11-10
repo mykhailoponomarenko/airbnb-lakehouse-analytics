@@ -1,0 +1,10 @@
+bundle:
+  name: airbnb-lakehouse-analytics
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    default: true
+    mode: development

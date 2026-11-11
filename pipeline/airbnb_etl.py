@@ -27,6 +27,7 @@ SILVER_CONTRACT = {
     "last_scraped": "date",
     "host_id": "long",
     "host_since": "date",
+    "hosts_time_as_host_years": "double",
     "host_response_time": "string",
     "host_response_rate": "percent",
     "host_acceptance_rate": "percent",
@@ -86,7 +87,9 @@ LEAKAGE_COLUMNS = [
 KEY_FEATURES = [
     "room_type", "accommodates", "bedrooms", "beds", "bathrooms",
     "neighbourhood_cleansed", "latitude", "longitude", "minimum_nights",
-    "availability_365", "review_scores_rating", "amenities",
+    "availability_365", "review_scores_rating", "review_scores_location", "amenities",
+    "number_of_reviews", "host_since", "hosts_time_as_host_years", "host_is_superhost",
+    "calculated_host_listings_count", "instant_bookable",
 ]
 
 FEATURE_COLUMNS = [
@@ -432,7 +435,7 @@ QUALITY_SCHEMA = (
     "priced_rows bigint, priced_share double, price_flags map<string,bigint>, "
     "missing_optional_columns array<string>, extra_source_columns array<string>, "
     "parse_failures map<string,bigint>, feature_null_pct map<string,double>, "
-    "bathroom_anomalies bigint, created_at timestamp"
+    "bathroom_anomalies bigint, created_at timestamp, empty_columns array<string>"
 )
 
 
@@ -442,6 +445,16 @@ def null_pct(df, columns):
         return {c: None for c in columns}
     row = df.agg(*[F.sum(F.col(c).isNull().cast("int")).alias(c) for c in columns]).first()
     return {c: round(100.0 * row[c] / total, 2) for c in columns}
+
+
+def empty_columns(df):
+    """Contract columns that are NULL in every row: present in the file, but carrying nothing."""
+    total = df.count()
+    if total == 0:
+        return []
+    columns = [c for c in SILVER_CONTRACT if c != "id" and c in df.columns]
+    row = df.agg(*[F.count(F.col(c)).alias(c) for c in columns]).first()
+    return [c for c in columns if row[c] == 0]
 
 
 # ---------- gold ----------
@@ -531,7 +544,10 @@ def listing_features(silver):
         "number_of_reviews", "number_of_reviews_ltm", "review_scores_rating",
         "review_scores_location", F.col("host_is_superhost").cast("int").alias("host_is_superhost"),
         F.col("calculated_host_listings_count").alias("host_listings_count"),
-        F.round(F.datediff("snapshot_date", "host_since") / 365.25, 2).alias("host_years"),
+        # host_since is empty in the 2026 snapshots; Inside Airbnb now ships hosts_time_as_host_years instead
+        F.round(
+            F.coalesce(F.datediff("snapshot_date", "host_since") / 365.25, F.col("hosts_time_as_host_years")), 2
+        ).alias("host_years"),
         F.col("instant_bookable").cast("int").alias("instant_bookable"),
         "latitude", "longitude",
         F.round(

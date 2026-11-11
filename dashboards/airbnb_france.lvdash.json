@@ -1,0 +1,1399 @@
+{
+  "datasets": [
+    {
+      "name": "city_summary",
+      "displayName": "city_summary",
+      "queryLines": [
+        "SELECT city_name, listings, priced_listings, priced_pct, median_price, p25_price, p75_price,\n",
+        "       median_availability_365, zero_availability_pct, avg_review_score, hosts, superhost_pct,\n",
+        "       multi_listing_host_pct, entire_home_pct, neighbourhoods\n",
+        "FROM airbnb_lakehouse.gold.city_summary\n",
+        "ORDER BY median_price DESC\n"
+      ]
+    },
+    {
+      "name": "room_types",
+      "displayName": "room_types",
+      "queryLines": [
+        "SELECT city_name, room_type, listings, share_pct, median_price\n",
+        "FROM airbnb_lakehouse.gold.room_type_summary\n",
+        "ORDER BY city_name, listings DESC\n"
+      ]
+    },
+    {
+      "name": "top_neighbourhoods",
+      "displayName": "top_neighbourhoods",
+      "queryLines": [
+        "SELECT city_name, neighbourhood, listings, median_price, avg_review_score\n",
+        "FROM airbnb_lakehouse.gold.neighbourhood_summary\n",
+        "WHERE priced_listings >= 20\n",
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY city ORDER BY median_price DESC) <= 5\n",
+        "ORDER BY CASE city WHEN 'paris' THEN 1 WHEN 'lyon' THEN 2 ELSE 3 END, median_price DESC\n"
+      ]
+    },
+    {
+      "name": "paris_vs_lyon",
+      "displayName": "paris_vs_lyon",
+      "queryLines": [
+        "WITH s AS (SELECT * FROM airbnb_lakehouse.gold.city_summary WHERE city IN ('paris', 'lyon')),\n",
+        "long AS (\n",
+        "  SELECT city, metric, value FROM s\n",
+        "  LATERAL VIEW STACK(9,\n",
+        "    '1 Listings', CAST(listings AS DOUBLE),\n",
+        "    '2 Share with a price (%)', CAST(priced_pct AS DOUBLE),\n",
+        "    '3 Median price (EUR)', CAST(median_price AS DOUBLE),\n",
+        "    '4 Entire-home share (%)', CAST(entire_home_pct AS DOUBLE),\n",
+        "    '5 Median available days / year', CAST(median_availability_365 AS DOUBLE),\n",
+        "    '6 Listings with 0 available days (%)', CAST(zero_availability_pct AS DOUBLE),\n",
+        "    '7 Average review score', CAST(avg_review_score AS DOUBLE),\n",
+        "    '8 Multi-listing hosts (%)', CAST(multi_listing_host_pct AS DOUBLE),\n",
+        "    '9 Superhosts (%)', CAST(superhost_pct AS DOUBLE)) t AS metric, value)\n",
+        "SELECT SUBSTRING(metric, 3) AS metric,\n",
+        "       ROUND(MAX(CASE WHEN city = 'paris' THEN value END), 2) AS paris,\n",
+        "       ROUND(MAX(CASE WHEN city = 'lyon' THEN value END), 2) AS lyon,\n",
+        "       ROUND(100 * (MAX(CASE WHEN city = 'lyon' THEN value END) / MAX(CASE WHEN city = 'paris' THEN value END) - 1), 1) AS lyon_vs_paris_pct\n",
+        "FROM long GROUP BY metric ORDER BY metric\n"
+      ]
+    },
+    {
+      "name": "room_price_by_city",
+      "displayName": "room_price_by_city",
+      "queryLines": [
+        "SELECT city_name, room_type, median_price, listings\n",
+        "FROM airbnb_lakehouse.gold.room_type_summary\n",
+        "WHERE listings >= 20\n",
+        "ORDER BY room_type, city_name\n"
+      ]
+    },
+    {
+      "name": "price_by_guests",
+      "displayName": "price_by_guests",
+      "queryLines": [
+        "SELECT city_name, LEAST(accommodates, 8) AS guests, PERCENTILE(price, 0.5) AS median_price, COUNT(*) AS listings\n",
+        "FROM airbnb_lakehouse.gold.listing_features\n",
+        "WHERE price IS NOT NULL AND room_type = 'Entire home/apt'\n",
+        "GROUP BY ALL ORDER BY city_name, guests\n"
+      ]
+    },
+    {
+      "name": "model_metrics",
+      "displayName": "model_metrics",
+      "queryLines": [
+        "SELECT model, INITCAP(city) AS city, variant, labeled_listings, model_mae_eur, baseline_mae_eur, improvement_eur\n",
+        "FROM airbnb_lakehouse.gold.v_model_metrics\n",
+        "ORDER BY model, city, variant\n"
+      ]
+    },
+    {
+      "name": "mae_by_city_and_model",
+      "displayName": "mae_by_city_and_model",
+      "queryLines": [
+        "SELECT INITCAP(city) AS city,\n",
+        "       CASE WHEN run_id = 'france_v1' THEN 'v1 (week 1)'\n",
+        "            WHEN variant = 'uncalibrated' THEN 'v2 without city prices'\n",
+        "            ELSE 'v2 (week 2)' END AS model_variant,\n",
+        "       model_mae_eur AS mae_eur\n",
+        "FROM airbnb_lakehouse.gold.v_model_metrics\n",
+        "WHERE city <> 'combined'\n",
+        "UNION ALL\n",
+        "SELECT INITCAP(city), 'Baseline', baseline_mae_eur\n",
+        "FROM airbnb_lakehouse.gold.v_model_metrics\n",
+        "WHERE city <> 'combined' AND run_id = 'france_v2' AND variant IN ('holdout', 'calibrated')\n",
+        "ORDER BY city, model_variant\n"
+      ]
+    },
+    {
+      "name": "predicted_vs_actual_v2",
+      "displayName": "predicted_vs_actual_v2",
+      "queryLines": [
+        "SELECT city_name, actual_price_eur, predicted_price_eur\n",
+        "FROM airbnb_lakehouse.gold.v_test_predictions\n",
+        "WHERE run_id = 'france_v2' AND actual_price_eur <= 1000\n"
+      ]
+    },
+    {
+      "name": "error_by_room_type",
+      "displayName": "error_by_room_type",
+      "queryLines": [
+        "SELECT model, city_name, room_type, COUNT(*) AS listings,\n",
+        "       ROUND(AVG(absolute_error_eur), 2) AS model_mae_eur,\n",
+        "       ROUND(AVG(baseline_absolute_error_eur), 2) AS baseline_mae_eur,\n",
+        "       ROUND(AVG(residual_eur), 2) AS mean_residual_eur\n",
+        "FROM airbnb_lakehouse.gold.v_test_predictions\n",
+        "GROUP BY ALL HAVING COUNT(*) >= 10\n",
+        "ORDER BY city_name, room_type, model\n"
+      ]
+    },
+    {
+      "name": "error_by_room_type_v2",
+      "displayName": "error_by_room_type_v2",
+      "queryLines": [
+        "SELECT CONCAT(city_name, ' - ', room_type) AS segment, ROUND(AVG(absolute_error_eur), 2) AS model_mae_eur\n",
+        "FROM airbnb_lakehouse.gold.v_test_predictions\n",
+        "WHERE run_id = 'france_v2'\n",
+        "GROUP BY city_name, room_type HAVING COUNT(*) >= 10\n",
+        "ORDER BY model_mae_eur DESC\n"
+      ]
+    },
+    {
+      "name": "error_by_neighbourhood_v2",
+      "displayName": "error_by_neighbourhood_v2",
+      "queryLines": [
+        "SELECT city_name, neighbourhood, COUNT(*) AS listings,\n",
+        "       ROUND(AVG(absolute_error_eur), 2) AS model_mae_eur,\n",
+        "       ROUND(AVG(residual_eur), 2) AS mean_residual_eur\n",
+        "FROM airbnb_lakehouse.gold.v_test_predictions\n",
+        "WHERE run_id = 'france_v2'\n",
+        "GROUP BY ALL HAVING COUNT(*) >= 15\n",
+        "ORDER BY model_mae_eur DESC LIMIT 15\n"
+      ]
+    },
+    {
+      "name": "most_mispriced_v2",
+      "displayName": "most_mispriced_v2",
+      "queryLines": [
+        "SELECT city_name, error_direction, name, neighbourhood, room_type, accommodates,\n",
+        "       actual_price_eur, predicted_price_eur, residual_eur, listing_url\n",
+        "FROM airbnb_lakehouse.gold.v_test_predictions\n",
+        "WHERE run_id = 'france_v2' AND price_flag <> 'extreme'\n",
+        "ORDER BY ABS(residual_eur) DESC LIMIT 30\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "city_overview",
+      "displayName": "City overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "t1",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Paris costs about twice as much as Lyon or Bordeaux, and 36–44% of listings in every city show no price\n",
+                "\n",
+                "Median advertised nightly price, EUR. Listings without a price are inactive (closed calendar), so medians use priced listings only. Snapshots: Paris 2026-09-16, Lyon and Bordeaux 2026-09-17.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "city_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "city_summary",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "listings",
+                      "expression": "`listings`"
+                    },
+                    {
+                      "name": "priced_pct",
+                      "expression": "`priced_pct`"
+                    },
+                    {
+                      "name": "median_price",
+                      "expression": "`median_price`"
+                    },
+                    {
+                      "name": "p25_price",
+                      "expression": "`p25_price`"
+                    },
+                    {
+                      "name": "p75_price",
+                      "expression": "`p75_price`"
+                    },
+                    {
+                      "name": "median_availability_365",
+                      "expression": "`median_availability_365`"
+                    },
+                    {
+                      "name": "avg_review_score",
+                      "expression": "`avg_review_score`"
+                    },
+                    {
+                      "name": "hosts",
+                      "expression": "`hosts`"
+                    },
+                    {
+                      "name": "superhost_pct",
+                      "expression": "`superhost_pct`"
+                    },
+                    {
+                      "name": "entire_home_pct",
+                      "expression": "`entire_home_pct`"
+                    },
+                    {
+                      "name": "neighbourhoods",
+                      "expression": "`neighbourhoods`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City"
+                  },
+                  {
+                    "fieldName": "listings",
+                    "displayName": "Listings"
+                  },
+                  {
+                    "fieldName": "priced_pct",
+                    "displayName": "% with price"
+                  },
+                  {
+                    "fieldName": "median_price",
+                    "displayName": "Median price"
+                  },
+                  {
+                    "fieldName": "p25_price",
+                    "displayName": "P25"
+                  },
+                  {
+                    "fieldName": "p75_price",
+                    "displayName": "P75"
+                  },
+                  {
+                    "fieldName": "median_availability_365",
+                    "displayName": "Median open days"
+                  },
+                  {
+                    "fieldName": "avg_review_score",
+                    "displayName": "Avg review"
+                  },
+                  {
+                    "fieldName": "hosts",
+                    "displayName": "Hosts"
+                  },
+                  {
+                    "fieldName": "superhost_pct",
+                    "displayName": "% superhost"
+                  },
+                  {
+                    "fieldName": "entire_home_pct",
+                    "displayName": "% entire home"
+                  },
+                  {
+                    "fieldName": "neighbourhoods",
+                    "displayName": "Neighbourhoods"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Per-city summary"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "median_price",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "city_summary",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "median_price",
+                      "expression": "`median_price`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "city_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "City"
+                },
+                "y": {
+                  "fieldName": "median_price",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Median price (EUR)"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Median nightly price (EUR)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "room_mix",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "room_types",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "share_pct",
+                      "expression": "`share_pct`"
+                    },
+                    {
+                      "name": "room_type",
+                      "expression": "`room_type`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "city_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "City"
+                },
+                "y": {
+                  "fieldName": "share_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "% of listings"
+                },
+                "color": {
+                  "fieldName": "room_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "room_type"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Room-type mix (% of listings)"
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 6,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "availability",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "city_summary",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "zero_availability_pct",
+                      "expression": "`zero_availability_pct`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "city_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "City"
+                },
+                "y": {
+                  "fieldName": "zero_availability_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "%"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Listings with 0 open days in the next year (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 6,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "nbhd_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "top_neighbourhoods",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "neighbourhood",
+                      "expression": "`neighbourhood`"
+                    },
+                    {
+                      "name": "listings",
+                      "expression": "`listings`"
+                    },
+                    {
+                      "name": "median_price",
+                      "expression": "`median_price`"
+                    },
+                    {
+                      "name": "avg_review_score",
+                      "expression": "`avg_review_score`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City"
+                  },
+                  {
+                    "fieldName": "neighbourhood",
+                    "displayName": "Neighbourhood"
+                  },
+                  {
+                    "fieldName": "listings",
+                    "displayName": "Listings"
+                  },
+                  {
+                    "fieldName": "median_price",
+                    "displayName": "Median price"
+                  },
+                  {
+                    "fieldName": "avg_review_score",
+                    "displayName": "Avg review"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Most expensive neighbourhoods (at least 20 priced listings)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "cross_city",
+      "displayName": "Cross-city comparison",
+      "layout": [
+        {
+          "widget": {
+            "name": "t2",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## The same listing costs about twice as much in Paris as in Lyon, for every room type\n",
+                "\n",
+                "Lyon is not a smaller Paris: the gap is a price level, not a different mix. That is why a model trained on both cities needs to know which city it is pricing.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "compare_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "paris_vs_lyon",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "name": "paris",
+                      "expression": "`paris`"
+                    },
+                    {
+                      "name": "lyon",
+                      "expression": "`lyon`"
+                    },
+                    {
+                      "name": "lyon_vs_paris_pct",
+                      "expression": "`lyon_vs_paris_pct`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "metric",
+                    "displayName": "Metric"
+                  },
+                  {
+                    "fieldName": "paris",
+                    "displayName": "Paris (A)"
+                  },
+                  {
+                    "fieldName": "lyon",
+                    "displayName": "Lyon (B)"
+                  },
+                  {
+                    "fieldName": "lyon_vs_paris_pct",
+                    "displayName": "Lyon vs Paris (%)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Paris against Lyon"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "room_price",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "room_price_by_city",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "room_type",
+                      "expression": "`room_type`"
+                    },
+                    {
+                      "name": "median_price",
+                      "expression": "`median_price`"
+                    },
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "room_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Room type"
+                },
+                "y": {
+                  "fieldName": "median_price",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Median price (EUR)"
+                },
+                "color": {
+                  "fieldName": "city_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "city_name"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Median price by room type (EUR)"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "guests_price",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "price_by_guests",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "guests",
+                      "expression": "`guests`"
+                    },
+                    {
+                      "name": "median_price",
+                      "expression": "`median_price`"
+                    },
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "guests",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Guests"
+                },
+                "y": {
+                  "fieldName": "median_price",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Median price (EUR)"
+                },
+                "color": {
+                  "fieldName": "city_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "city_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Entire homes: median price by number of guests (8 = 8+)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "model",
+      "displayName": "Model",
+      "layout": [
+        {
+          "widget": {
+            "name": "t3",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Once it knows the city's price level, v2 beats the baseline in every city. The week-1 model overpriced 97% of Bordeaux listings\n",
+                "\n",
+                "MAE in EUR on held-out listings only: the Paris and Lyon test split, and Bordeaux (city C). v1 = week-1 model, scored on Bordeaux unchanged. v2 = week-2 model, where *calibrated* uses Bordeaux's median price from its training split and *uncalibrated* uses no Bordeaux prices at all. Baseline = median price of the same room type and guest count in Paris+Lyon training data.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "mae_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "mae_by_city_and_model",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city",
+                      "expression": "`city`"
+                    },
+                    {
+                      "name": "mae_eur",
+                      "expression": "`mae_eur`"
+                    },
+                    {
+                      "name": "model_variant",
+                      "expression": "`model_variant`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "city",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "City"
+                },
+                "y": {
+                  "fieldName": "mae_eur",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "MAE (EUR)"
+                },
+                "color": {
+                  "fieldName": "model_variant",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "model_variant"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "MAE by city: baseline, v1, v2 (EUR, lower is better). Bordeaux v1 = first run on all priced listings"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "metrics_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "model_metrics",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    },
+                    {
+                      "name": "city",
+                      "expression": "`city`"
+                    },
+                    {
+                      "name": "variant",
+                      "expression": "`variant`"
+                    },
+                    {
+                      "name": "labeled_listings",
+                      "expression": "`labeled_listings`"
+                    },
+                    {
+                      "name": "model_mae_eur",
+                      "expression": "`model_mae_eur`"
+                    },
+                    {
+                      "name": "baseline_mae_eur",
+                      "expression": "`baseline_mae_eur`"
+                    },
+                    {
+                      "name": "improvement_eur",
+                      "expression": "`improvement_eur`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model"
+                  },
+                  {
+                    "fieldName": "city",
+                    "displayName": "City"
+                  },
+                  {
+                    "fieldName": "variant",
+                    "displayName": "Variant"
+                  },
+                  {
+                    "fieldName": "labeled_listings",
+                    "displayName": "Listings"
+                  },
+                  {
+                    "fieldName": "model_mae_eur",
+                    "displayName": "Model MAE"
+                  },
+                  {
+                    "fieldName": "baseline_mae_eur",
+                    "displayName": "Baseline MAE"
+                  },
+                  {
+                    "fieldName": "improvement_eur",
+                    "displayName": "Improvement"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Test-set error, all runs"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "scatter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "predicted_vs_actual_v2",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "actual_price_eur",
+                      "expression": "`actual_price_eur`"
+                    },
+                    {
+                      "name": "predicted_price_eur",
+                      "expression": "`predicted_price_eur`"
+                    },
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "actual_price_eur",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Actual price (EUR)"
+                },
+                "y": {
+                  "fieldName": "predicted_price_eur",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Predicted price (EUR)"
+                },
+                "color": {
+                  "fieldName": "city_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "City"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "v2: predicted against actual price (held-out, up to EUR 1,000)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "err_room",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "error_by_room_type_v2",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "segment",
+                      "expression": "`segment`"
+                    },
+                    {
+                      "name": "model_mae_eur",
+                      "expression": "`model_mae_eur`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "model_mae_eur",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "MAE (EUR)"
+                },
+                "y": {
+                  "fieldName": "segment",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "City - room type"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "v2: MAE by city and room type (EUR)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 9,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "err_room_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "error_by_room_type",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    },
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "room_type",
+                      "expression": "`room_type`"
+                    },
+                    {
+                      "name": "listings",
+                      "expression": "`listings`"
+                    },
+                    {
+                      "name": "model_mae_eur",
+                      "expression": "`model_mae_eur`"
+                    },
+                    {
+                      "name": "baseline_mae_eur",
+                      "expression": "`baseline_mae_eur`"
+                    },
+                    {
+                      "name": "mean_residual_eur",
+                      "expression": "`mean_residual_eur`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model"
+                  },
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City"
+                  },
+                  {
+                    "fieldName": "room_type",
+                    "displayName": "Room type"
+                  },
+                  {
+                    "fieldName": "listings",
+                    "displayName": "Listings"
+                  },
+                  {
+                    "fieldName": "model_mae_eur",
+                    "displayName": "Model MAE"
+                  },
+                  {
+                    "fieldName": "baseline_mae_eur",
+                    "displayName": "Baseline MAE"
+                  },
+                  {
+                    "fieldName": "mean_residual_eur",
+                    "displayName": "Mean residual (+ = under-priced)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Error by room type, v1 against v2"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "err_nbhd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "error_by_neighbourhood_v2",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "neighbourhood",
+                      "expression": "`neighbourhood`"
+                    },
+                    {
+                      "name": "listings",
+                      "expression": "`listings`"
+                    },
+                    {
+                      "name": "model_mae_eur",
+                      "expression": "`model_mae_eur`"
+                    },
+                    {
+                      "name": "mean_residual_eur",
+                      "expression": "`mean_residual_eur`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City"
+                  },
+                  {
+                    "fieldName": "neighbourhood",
+                    "displayName": "Neighbourhood"
+                  },
+                  {
+                    "fieldName": "listings",
+                    "displayName": "Listings"
+                  },
+                  {
+                    "fieldName": "model_mae_eur",
+                    "displayName": "MAE"
+                  },
+                  {
+                    "fieldName": "mean_residual_eur",
+                    "displayName": "Mean residual (+ = under-priced)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "v2: neighbourhoods with the largest error"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "worst",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "most_mispriced_v2",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "city_name",
+                      "expression": "`city_name`"
+                    },
+                    {
+                      "name": "error_direction",
+                      "expression": "`error_direction`"
+                    },
+                    {
+                      "name": "name",
+                      "expression": "`name`"
+                    },
+                    {
+                      "name": "neighbourhood",
+                      "expression": "`neighbourhood`"
+                    },
+                    {
+                      "name": "room_type",
+                      "expression": "`room_type`"
+                    },
+                    {
+                      "name": "accommodates",
+                      "expression": "`accommodates`"
+                    },
+                    {
+                      "name": "actual_price_eur",
+                      "expression": "`actual_price_eur`"
+                    },
+                    {
+                      "name": "predicted_price_eur",
+                      "expression": "`predicted_price_eur`"
+                    },
+                    {
+                      "name": "residual_eur",
+                      "expression": "`residual_eur`"
+                    },
+                    {
+                      "name": "listing_url",
+                      "expression": "`listing_url`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "city_name",
+                    "displayName": "City"
+                  },
+                  {
+                    "fieldName": "error_direction",
+                    "displayName": "Direction"
+                  },
+                  {
+                    "fieldName": "name",
+                    "displayName": "Listing"
+                  },
+                  {
+                    "fieldName": "neighbourhood",
+                    "displayName": "Neighbourhood"
+                  },
+                  {
+                    "fieldName": "room_type",
+                    "displayName": "Room type"
+                  },
+                  {
+                    "fieldName": "accommodates",
+                    "displayName": "Guests"
+                  },
+                  {
+                    "fieldName": "actual_price_eur",
+                    "displayName": "Actual"
+                  },
+                  {
+                    "fieldName": "predicted_price_eur",
+                    "displayName": "Predicted"
+                  },
+                  {
+                    "fieldName": "residual_eur",
+                    "displayName": "Residual"
+                  },
+                  {
+                    "fieldName": "listing_url",
+                    "displayName": "URL"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "v2: the 30 most under- or over-priced listings",
+                "showDescription": true,
+                "description": "Excludes extreme advertised prices (more than 10x the city median). Without this filter, all 30 largest errors are such extremes, all under-priced: the model does not follow placeholder or luxury-event prices."
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 28,
+            "width": 6,
+            "height": 8
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}

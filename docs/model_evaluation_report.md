@@ -4,7 +4,7 @@
 
 Region: France. Currency: EUR. Paris (A) and Lyon (B) are the development cities; Bordeaux (C) is the new-client city evaluated after A/B. Results are derived from Databricks Gold table queries. Report date: 2026-11-11.
 
-The evaluation uses run ID `france_v1`. Model code: `model/price_model.py`; execution notebook: `notebooks/02_price_prediction.py`. The frozen artifact manifest records model configuration and dependency versions.
+Sections up to "First Bordeaux run" describe the week-1 model, run ID `france_v1`, and are kept unchanged as first-run evidence. The week-2 model `france_v2` is described in [Week 2: france_v2](#week-2-france_v2); the full Bordeaux story is in [city_c.md](city_c.md). Model code: `model/price_model.py`; execution notebook: `notebooks/02_price_prediction.py`. The frozen artifact manifest records model configuration and dependency versions.
 
 ## Data and evaluation population
 
@@ -72,22 +72,37 @@ Plausible explanations include Paris-heavy training (34,803 of 38,875 labeled tr
 
 ## First Bordeaux run and change record
 
-The evaluation sequence was A/B fitting and evaluation, followed by Bordeaux ETL and evaluate_c using the saved model. Gold contains 12,063 Bordeaux listings and evaluation produced 7,722 labeled predictions. No execution errors were recorded in the completed workflow. No pipeline fixes or model changes were made for this evaluation. Successful execution and complete prediction coverage do not establish good predictive accuracy: the Bordeaux performance gap remains a measured limitation. Detailed ETL quality-log analysis is outside the scope of this model report.
+The evaluation sequence was: fit and evaluate on A/B, then run the Bordeaux ETL, then `evaluate_c` with the saved model. The ETL raised no errors. Gold contains 12,063 Bordeaux listings, and the evaluation produced 7,722 labeled predictions. A separate Gold-table query confirmed 12,063 rows, 12,063 distinct listing IDs and 12,063 non-null predictions for `france_v1` / `evaluate_c`, so prediction coverage is complete. Complete coverage does not mean good accuracy. The data-quality findings, the change log (pipeline fixes P1–P3, model changes M1–M4) and the gap explanation are in [city_c.md](city_c.md).
 
-| Category | Documented status |
-|---|---|
-| Pipeline fixes | None; no execution errors recorded |
-| Model changes | Original model evaluated without retraining |
-| After-change Bordeaux MAE | Not available; no revised model evaluated |
-| Pipeline commit, execution timestamps and exact dependency versions | Not included in this report |
+## Week 2: france_v2
 
-Possible future experiments are log-price fitting, robust loss, city-balanced training and transferable geographic features. Choose settings using inner A/B training validation, preserving the final A/B test. Since Bordeaux outcomes have now been inspected, subsequent Bordeaux scores must be disclosed as post-diagnosis results, not a fresh untouched test. Do not replace the first-run evidence.
+Changes, all chosen on a validation slice of A/B training rows:
+* log target;
+* the target expressed relative to each city's median training price;
+* `host_years` restored (pipeline fix P1);
+* `instant_bookable` (empty) and `property_type` (city-specific meaning) removed;
+* location and review features added: `dist_to_center_km`, `review_scores_location`, `review_scores_rating`, `number_of_reviews`, `availability_365`.
+
+None is derived from price; see the leakage review in the EDA notebook. The forest settings are unchanged.
+
+A new city needs a price level. v2 takes it from that city's ETL `train` split, the calibration sample, and is evaluated on its `test` split. It also reports the uncalibrated score, which uses the pooled A/B level.
+
+| Evaluation (Databricks, run `france_v2`) | Labeled n | Model MAE EUR | Baseline MAE EUR |
+|---|---:|---:|---:|
+| Paris test | 8,734 | 109.89 | 156.65 |
+| Lyon test | 997 | 38.45 | 104.61 |
+| A/B combined test | 9,731 | 102.57 | 151.32 |
+| Bordeaux test, calibrated (post-diagnosis) | 1,583 | 48.21 | 114.78 |
+| Bordeaux test, uncalibrated (post-diagnosis) | 1,583 | 133.12 | 114.78 |
+| Bordeaux test, `france_v1` on the same rows (SQL join of both runs' predictions) | 1,583 | 234.00 | 114.78 |
+
+v2 beats the baseline in both training cities, including Lyon, which v1 lost by €53. Paris remains the hardest city: its MAE is still above €100, and v2 underprices Paris on average (mean residual about +€34 in our local rerun), because a log model predicts close to the typical price and Paris has a long expensive tail. Without a Bordeaux price level the model still loses to the baseline. That limitation is explained in [city_c.md](city_c.md#explaining-the-gap).
 
 ## Gold outputs and dashboard integration
 
-Catalog: airbnb_lakehouse. Tables: gold.price_predictions and gold.model_metrics. Filter run_id = 'france_v1'. For evaluation charts use evaluation_set IN ('ab_test', 'c_unseen'); never report ab_train errors as test accuracy. Null actual prices cannot contribute to error metrics.
+Catalog: airbnb_lakehouse. Tables: gold.price_predictions and gold.model_metrics. Filter one run ID: `france_v1` (week 1) or `france_v2` (week 2). For evaluation charts use evaluation_set IN ('ab_test', 'c_unseen'); `c_calibration` rows (v2) supplied the city level and are not test rows; never report ab_train errors as test accuracy. Null actual prices cannot contribute to error metrics.
 
-Prediction coverage is confirmed for all three cities: Paris 77,149/77,149, Lyon 9,201/9,201 and Bordeaux 12,063/12,063. For Bordeaux, a separate Gold-table query returned 12,063 rows, 12,063 distinct listing IDs and 12,063 non-null predictions for run france_v1 and evaluation stage evaluate_c. Accuracy is evaluated on the 7,722 listings with valid actual prices.
+Prediction coverage is confirmed for all three cities in `france_v1`: Paris 77,149/77,149, Lyon 9,201/9,201 and Bordeaux 12,063/12,063 (12,063 distinct listing IDs, 12,063 non-null predictions). Accuracy is evaluated on the 7,722 Bordeaux listings with valid actual prices. From `france_v2` onwards the notebook asserts completeness itself.
 
 Dashboard: show baseline versus model MAE, held-out actual versus predicted, errors by room type/neighbourhood, and largest under/overpricing examples. Suggested evidence-based title: “The model improves Paris accuracy but overprices Lyon and Bordeaux.” Predictions are estimates of advertised prices, not guaranteed income.
 

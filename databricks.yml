@@ -4,6 +4,12 @@ bundle:
 include:
   - resources/*.yml
 
+variables:
+  warehouse_id:
+    description: SQL warehouse that runs the dashboard queries (Free Edition has one serverless starter warehouse).
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
+
 targets:
   dev:
     default: true

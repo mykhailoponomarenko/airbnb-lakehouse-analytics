@@ -1,0 +1,28 @@
+resources:
+  dashboards:
+    airbnb_france:
+      display_name: "Airbnb France: Paris, Lyon, Bordeaux"
+      file_path: ../dashboards/airbnb_france.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+
+  jobs:
+    price_model:
+      name: price_model
+      description: Train on A/B (mode=train_ab) or score the frozen model on city C (mode=evaluate_c). Run after the ETL.
+      parameters:
+        - name: mode
+          default: train_ab
+        - name: run_id
+          default: france_v2
+        - name: ab_cities
+          default: paris,lyon
+        - name: c_city
+          default: bordeaux
+        - name: reference_run_id
+          default: ""
+        - name: catalog
+          default: airbnb_lakehouse
+      tasks:
+        - task_key: model
+          notebook_task:
+            notebook_path: ../notebooks/02_price_prediction.py

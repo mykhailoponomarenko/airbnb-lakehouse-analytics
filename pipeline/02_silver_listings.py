@@ -13,6 +13,7 @@
 # MAGIC | Contract | required columns must exist, optional ones become NULL | fail loudly on a schema the model cannot use, tolerate the rest |
 # MAGIC | Types | `try_cast` everywhere, `t/f` → boolean, `95%` → 0.95, `$1,234.00` → 1234.0, amenities JSON → array | serverless runs in ANSI mode, a plain cast would kill the run on one bad value |
 # MAGIC | Parse failures | counted per column in `silver.quality_report` | a value that did not parse becomes NULL, but never silently |
+# MAGIC | Empty columns | contract columns that are NULL in every row listed in `empty_columns` | a column can exist and still carry nothing (week-2 fix: `host_since` and `instant_bookable` are empty in every 2026 snapshot, which silently removed two model features) |
 # MAGIC | Keys | rows without a numeric `id` dropped, duplicate ids → latest `last_scraped` | one row per listing |
 # MAGIC | Ranges | out-of-range values → NULL (price ≤ 0, availability outside 0–365, scores outside 0–5, …) | impossible values are missing values |
 # MAGIC | Bathrooms | number from `bathrooms`, else parsed from `bathrooms_text` (half-bath = 0.5); type Shared / Private / Standard; > 8 in a small or private-room listing → NULL + flag | the numeric column is often empty |
@@ -92,8 +93,10 @@ report = (
     bronze_rows, bronze_rows - valid_ids, valid_ids - silver_rows, silver_rows,
     priced_rows, round(priced_rows / silver_rows, 4) if silver_rows else None, flags,
     missing_optional, extra_columns, failures, etl.null_pct(silver, etl.KEY_FEATURES),
-    silver.filter("bathroom_anomaly").count(), datetime.now(timezone.utc),
+    silver.filter("bathroom_anomaly").count(), datetime.now(timezone.utc), etl.empty_columns(silver),
 )
+if report[-1]:
+    print("WARNING: columns present in the file but NULL in every row:", report[-1])
 
 quality_table = etl.table("silver", "quality_report")
 etl.append_log(spark, [report], etl.QUALITY_SCHEMA, quality_table)

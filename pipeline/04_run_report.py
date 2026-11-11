@@ -48,7 +48,8 @@ display(
 
 display(
     latest_quality.select(
-        "city", "missing_optional_columns", "parse_failures", F.size("extra_source_columns").alias("extra_columns")
+        "city", "missing_optional_columns", "empty_columns", "parse_failures",
+        F.size("extra_source_columns").alias("extra_columns")
     ).orderBy("city")
 )
 
